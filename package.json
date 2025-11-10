@@ -1,27 +1,26 @@
 {
-  "name": "adil-portfolio",
+  "name": "portfolio-ai-server",
   "version": "1.0.0",
-  "description": "Personal portfolio for Adil Hasan (Raven Corp.Tech). Dark mode by default with a theme toggle, project data from JSON, and a contact form placeholder.",
-  "main": "animations.js",
+  "description": "Backend server for the Portfolio AI chatbot.",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 0",
     "start": "node server.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/RavenCorp-Tech/Adil-Portfolio.git"
-  },
-  "keywords": [],
-  "author": "",
+  "author": "Adil Hasan",
   "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/RavenCorp-Tech/Adil-Portfolio/issues"
-  },
-  "homepage": "https://github.com/RavenCorp-Tech/Adil-Portfolio#readme",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RavenCorp-Tech/Portfolio-AI-Server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RavenCorp-Tech/Portfolio-AI-Server/issues"
+  },
+  "homepage": "https://github.com/RavenCorp-Tech/Portfolio-AI-Server#readme"
 }
