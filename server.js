@@ -7,7 +7,7 @@ const cors = require('cors');
 
 // --- 2. INITIALIZE SERVER & AI (BEFORE DB LOAD) ---
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
