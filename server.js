@@ -8,6 +8,7 @@ const cors = require('cors');
 // --- 2. INITIALIZE SERVER & AI (BEFORE DB LOAD) ---
 const app = express();
 const port = process.env.PORT || 3000;
+
 const corsOptions = {
   origin: [
     'https://ravencorp-tech.github.io',
