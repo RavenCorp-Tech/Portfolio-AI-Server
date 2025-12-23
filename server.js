@@ -8,7 +8,15 @@ const cors = require('cors');
 // --- 2. INITIALIZE SERVER & AI (BEFORE DB LOAD) ---
 const app = express();
 const port = process.env.PORT || 3000;
-app.use(cors());
+const corsOptions = {
+  origin: [
+    'https://ravencorp-tech.github.io',
+    'https://www.ravencorp.tech',
+    'https://ravencorp.tech'
+  ],
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
