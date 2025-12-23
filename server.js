@@ -23,7 +23,7 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
 const chatModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro", // Your working model name
+  model: "gemini-3-pro-preview", // Your working model name
   safetySettings: [
     { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
     { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
