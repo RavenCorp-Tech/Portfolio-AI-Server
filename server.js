@@ -1,108 +1,150 @@
 // --- 1. SETUP ---
-require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const cors = require("cors");
+
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const OpenAI = require("openai");
-const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// --- 2. LOGGING ---
-// Force logs to show up in Azure Stream
-console.log("--- SERVER STARTING UP ---");
+// --- 2. BOOT LOGGING ---
+console.log("=================================");
+console.log("RAVEN SERVER BOOT SEQUENCE START");
+console.log("NODE VERSION:", process.version);
+console.log("PORT:", port);
+console.log("=================================");
 
-// --- 3. CORS ---
+// --- 3. CORS & BODY ---
 app.use(cors({
-  origin: true, // Allow all origins temporarily for debugging
+  origin: true,
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-// --- 4. HEALTH CHECK (NEW) ---
-// This lets you visit the URL in your browser to see if Node is working
+// --- 4. HEALTH CHECK ---
 app.get("/", (req, res) => {
-  res.send(`
-    <h1>Raven Server is Running!</h1>
+  res.status(200).send(`
+    <h1>Raven Server is Running</h1>
     <p>Status: Online</p>
     <p>Time: ${new Date().toISOString()}</p>
+    <p>Node: ${process.version}</p>
   `);
 });
 
-// --- 5. AI CONFIG ---
-// Safe Mode: Using standard models to prevent crashes
+// --- 5. AI SERVICES (SAFE INIT) ---
+let embeddingModel = null;
+let openai = null;
+
 try {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "missing-key");
-  var embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-  
-  var openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "missing-key",
-  });
-  console.log("AI Services Initialized.");
-} catch (e) {
-  console.error("AI Init Error:", e);
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn("WARNING: GEMINI_API_KEY not set");
+  } else {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    embeddingModel = genAI.getGenerativeModel({
+      model: "text-embedding-004"
+    });
+    console.log("Gemini embedding model ready");
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("WARNING: OPENAI_API_KEY not set");
+  } else {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    console.log("OpenAI client ready");
+  }
+} catch (err) {
+  console.error("AI INIT FAILURE (non-fatal):", err);
 }
 
 // --- 6. DATABASE LOAD ---
 let vectorDatabase = [];
+
 try {
   const dbPath = path.join(__dirname, "vector-database.json");
+  console.log("Loading DB from:", dbPath);
+
   if (fs.existsSync(dbPath)) {
-    const data = fs.readFileSync(dbPath, "utf8");
-    vectorDatabase = JSON.parse(data);
-    console.log(`Database loaded: ${vectorDatabase.length} entries.`);
+    const raw = fs.readFileSync(dbPath, "utf8");
+    vectorDatabase = JSON.parse(raw);
+    console.log(`Vector DB loaded: ${vectorDatabase.length} entries`);
   } else {
-    console.error("WARNING: vector-database.json not found at " + dbPath);
+    console.warn("vector-database.json NOT FOUND");
   }
 } catch (err) {
-  console.error("FATAL: Database load failed", err);
+  console.error("DB LOAD ERROR (continuing without DB):", err);
+  vectorDatabase = [];
 }
 
 // --- 7. CHAT ENDPOINT ---
 app.post("/api/chat", async (req, res) => {
-  console.log("Received POST /api/chat"); // Log request
-  try {
-    const userQuery = req.body.question;
-    if (!userQuery) return res.status(400).json({ error: "No question" });
+  console.log("POST /api/chat");
 
-    // 1. Search (Mock if DB empty)
+  try {
+    if (!openai) {
+      return res.status(500).json({
+        error: "OpenAI client not initialized"
+      });
+    }
+
+    const userQuery = req.body?.question;
+    if (!userQuery) {
+      return res.status(400).json({ error: "Missing question" });
+    }
+
     let context = "";
-    if (vectorDatabase.length > 0) {
-      const result = await embeddingModel.embedContent(userQuery);
-      const queryEmbedding = result.embedding.values;
-      // ... (Simple cosine sim) ...
-      const chunks = vectorDatabase.map(chunk => {
-        let dot = 0.0, nA = 0.0, nB = 0.0;
-        for (let i = 0; i < queryEmbedding.length; i++) {
+
+    if (embeddingModel && vectorDatabase.length > 0) {
+      const embedResult = await embeddingModel.embedContent(userQuery);
+      const queryEmbedding = embedResult.embedding.values;
+
+      const ranked = vectorDatabase
+        .map(chunk => {
+          let dot = 0, nA = 0, nB = 0;
+          for (let i = 0; i < queryEmbedding.length; i++) {
             dot += queryEmbedding[i] * chunk.embedding[i];
             nA += queryEmbedding[i] ** 2;
             nB += chunk.embedding[i] ** 2;
-        }
-        return { text: chunk.text, score: dot / (Math.sqrt(nA) * Math.sqrt(nB)) };
-      }).sort((a, b) => b.score - a.score).slice(0, 3);
-      context = chunks.map(c => c.text).join("\n\n");
+          }
+          return {
+            text: chunk.text,
+            score: dot / (Math.sqrt(nA) * Math.sqrt(nB))
+          };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+
+      context = ranked.map(r => r.text).join("\n\n");
     }
 
-    // 2. Generate
-    // Using gpt-4o to guarantee it works. Change to 5.2 LATER once stable.
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o", 
+      model: "gpt-4o",
       messages: [
-        { role: "system", content: "You are an assistant. Context: " + context },
+        { role: "system", content: "Use the following context if relevant:\n" + context },
         { role: "user", content: userQuery }
-      ],
+      ]
     });
 
-    res.json({ answer: completion.choices[0].message.content });
+    res.json({
+      answer: completion.choices[0].message.content
+    });
 
-  } catch (error) {
-    console.error("CHAT CRASH:", error);
-    res.status(500).json({ error: error.message, stack: error.stack });
+  } catch (err) {
+    console.error("CHAT HANDLER ERROR:", err);
+    res.status(500).json({
+      error: err.message
+    });
   }
 });
 
+// --- 8. START SERVER ---
 app.listen(port, () => {
-  console.log(`Server listening on ${port}`);
+  console.log("=================================");
+  console.log("SERVER LISTENING SUCCESSFULLY");
+  console.log("PORT:", port);
+  console.log("=================================");
 });
