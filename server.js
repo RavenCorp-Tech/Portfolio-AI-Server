@@ -1,4 +1,6 @@
-// --- 1. SETUP ---
+// ===============================
+// 1. SETUP
+// ===============================
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -8,23 +10,29 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const OpenAI = require("openai");
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
 
-// --- 2. BOOT LOGGING ---
+// ===============================
+// 2. BOOT LOGGING
+// ===============================
 console.log("=================================");
 console.log("RAVEN SERVER BOOT SEQUENCE START");
 console.log("NODE VERSION:", process.version);
 console.log("PORT:", port);
 console.log("=================================");
 
-// --- 3. CORS & BODY ---
+// ===============================
+// 3. CORS & BODY
+// ===============================
 app.use(cors({
   origin: true,
   credentials: true
 }));
 app.use(express.json({ limit: "1mb" }));
 
-// --- 4. HEALTH CHECK ---
+// ===============================
+// 4. HEALTH CHECK
+// ===============================
 app.get("/", (req, res) => {
   res.status(200).send(`
     <h1>Raven Server is Running</h1>
@@ -34,11 +42,14 @@ app.get("/", (req, res) => {
   `);
 });
 
-// --- 5. AI SERVICES (SAFE INIT) ---
+// ===============================
+// 5. AI SERVICES INIT
+// ===============================
 let embeddingModel = null;
 let openai = null;
 
 try {
+  // ---- Gemini Embeddings ----
   if (!process.env.GEMINI_API_KEY) {
     console.warn("WARNING: GEMINI_API_KEY not set");
   } else {
@@ -49,19 +60,28 @@ try {
     console.log("Gemini embedding model ready");
   }
 
+  // ---- OpenRouter (GPT-5.2) ----
   if (!process.env.OPENAI_API_KEY) {
     console.warn("WARNING: OPENAI_API_KEY not set");
   } else {
     openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        "HTTP-Referer": "https://www.ravencorp.tech",
+        "X-Title": "RavenCorp AI Assistant"
+      }
     });
-    console.log("OpenAI client ready");
+    console.log("OpenRouter OpenAI client ready");
   }
+
 } catch (err) {
   console.error("AI INIT FAILURE (non-fatal):", err);
 }
 
-// --- 6. DATABASE LOAD ---
+// ===============================
+// 6. DATABASE LOAD
+// ===============================
 let vectorDatabase = [];
 
 try {
@@ -80,15 +100,15 @@ try {
   vectorDatabase = [];
 }
 
-// --- 7. CHAT ENDPOINT ---
+// ===============================
+// 7. CHAT ENDPOINT
+// ===============================
 app.post("/api/chat", async (req, res) => {
   console.log("POST /api/chat");
 
   try {
     if (!openai) {
-      return res.status(500).json({
-        error: "OpenAI client not initialized"
-      });
+      return res.status(500).json({ error: "AI client not initialized" });
     }
 
     const userQuery = req.body?.question;
@@ -98,6 +118,7 @@ app.post("/api/chat", async (req, res) => {
 
     let context = "";
 
+    // ---- Vector Search ----
     if (embeddingModel && vectorDatabase.length > 0) {
       const embedResult = await embeddingModel.embedContent(userQuery);
       const queryEmbedding = embedResult.embedding.values;
@@ -121,12 +142,18 @@ app.post("/api/chat", async (req, res) => {
       context = ranked.map(r => r.text).join("\n\n");
     }
 
+    // ---- GPT-5.2 via OpenRouter ----
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "openai/gpt-5.2",
       messages: [
-        { role: "system", content: "Use the following context if relevant:\n" + context },
+        {
+          role: "system",
+          content: "You are Raven, an AI assistant for Adil Hasan’s portfolio. Use the provided context only if relevant.\n\n" + context
+        },
         { role: "user", content: userQuery }
-      ]
+      ],
+      temperature: 0.7,
+      max_tokens: 600
     });
 
     res.json({
@@ -135,13 +162,24 @@ app.post("/api/chat", async (req, res) => {
 
   } catch (err) {
     console.error("CHAT HANDLER ERROR:", err);
+
+    if (err.status === 401) {
+      return res.status(401).json({ error: "Invalid OpenRouter API key" });
+    }
+
+    if (err.status === 429) {
+      return res.status(429).json({ error: "AI is busy. Please try again shortly." });
+    }
+
     res.status(500).json({
-      error: err.message
+      error: "AI service error"
     });
   }
 });
 
-// --- 8. START SERVER ---
+// ===============================
+// 8. START SERVER
+// ===============================
 app.listen(port, () => {
   console.log("=================================");
   console.log("SERVER LISTENING SUCCESSFULLY");
