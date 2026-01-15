@@ -115,8 +115,22 @@ app.post("/api/chat", async (req, res) => {
     res.json({ answer: answer });
 
   } catch (error) {
-    console.error("Error in /api/chat:", error);
-    res.status(500).json({ error: "Something went wrong." });
+    // --- DEBUGGING BLOCK ---
+    console.error("FULL ERROR DETAILS:", error);
+    
+    // Check for specific OpenAI errors
+    if (error.status === 401) {
+      return res.status(500).json({ error: "Auth Error: API Key is invalid or expired." });
+    }
+    if (error.status === 429) {
+      return res.status(500).json({ error: "Billing Error: No credits or rate limit exceeded." });
+    }
+    
+    // Send the ACTUAL error message to the frontend for debugging
+    res.status(500).json({ 
+      error: `Server Error: ${error.message || "Unknown Error"}`,
+      details: JSON.stringify(error)
+    });
   }
 });
 
