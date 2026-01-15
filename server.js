@@ -178,6 +178,53 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ===============================
+// ADMIN-ONLY INGESTION ENDPOINT
+// ===============================
+app.post("/api/admin/ingest", async (req, res) => {
+  try {
+    // 1) Verify admin secret
+    const secret = req.headers["x-admin-secret"];
+    if (secret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // 2) Validate input
+    const { text } = req.body;
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "Missing or invalid text" });
+    }
+
+    if (!embeddingModel) {
+      return res.status(500).json({ error: "Embedding model not available" });
+    }
+
+    // 3) Create embedding
+    const embed = await embeddingModel.embedContent(text);
+
+    // 4) Append to in-memory DB
+    vectorDatabase.push({
+      text,
+      embedding: embed.embedding.values
+    });
+
+    // 5) Persist to disk (same format you already use)
+    const dbPath = path.join(__dirname, "vector-database.json");
+    fs.writeFileSync(dbPath, JSON.stringify(vectorDatabase, null, 2));
+
+    // 6) Respond
+    res.json({
+      status: "Saved",
+      totalEntries: vectorDatabase.length
+    });
+
+  } catch (err) {
+    console.error("ADMIN INGEST ERROR:", err);
+    res.status(500).json({ error: "Admin ingest failed" });
+  }
+});
+
+
+// ===============================
 // 8. START SERVER
 // ===============================
 app.listen(port, () => {
