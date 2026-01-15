@@ -2,6 +2,7 @@
 require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
+const path = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cors = require('cors');
 
