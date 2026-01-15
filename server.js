@@ -13,6 +13,12 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 // ===============================
+// CONVERSATION MEMORY (IN-MEMORY)
+// ===============================
+const conversationMemory = new Map();
+const MAX_MEMORY_MESSAGES = 6;
+
+// ===============================
 // 2. BOOT LOGGING
 // ===============================
 console.log("=================================");
@@ -49,21 +55,19 @@ let embeddingModel = null;
 let openai = null;
 
 try {
-  // ---- Gemini Embeddings ----
-  if (!process.env.GEMINI_API_KEY) {
-    console.warn("WARNING: GEMINI_API_KEY not set");
-  } else {
+  // Gemini embeddings
+  if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     embeddingModel = genAI.getGenerativeModel({
       model: "text-embedding-004"
     });
     console.log("Gemini embedding model ready");
+  } else {
+    console.warn("WARNING: GEMINI_API_KEY not set");
   }
 
-  // ---- OpenRouter (GPT-5.2) ----
-  if (!process.env.OPENAI_API_KEY) {
-    console.warn("WARNING: OPENAI_API_KEY not set");
-  } else {
+  // OpenRouter (GPT-5.2)
+  if (process.env.OPENAI_API_KEY) {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
       baseURL: "https://openrouter.ai/api/v1",
@@ -73,6 +77,8 @@ try {
       }
     });
     console.log("OpenRouter OpenAI client ready");
+  } else {
+    console.warn("WARNING: OPENAI_API_KEY not set");
   }
 
 } catch (err) {
@@ -89,22 +95,24 @@ try {
   console.log("Loading DB from:", dbPath);
 
   if (fs.existsSync(dbPath)) {
-    const raw = fs.readFileSync(dbPath, "utf8");
-    vectorDatabase = JSON.parse(raw);
+    vectorDatabase = JSON.parse(fs.readFileSync(dbPath, "utf8"));
     console.log(`Vector DB loaded: ${vectorDatabase.length} entries`);
   } else {
     console.warn("vector-database.json NOT FOUND");
   }
 } catch (err) {
-  console.error("DB LOAD ERROR (continuing without DB):", err);
+  console.error("DB LOAD ERROR:", err);
   vectorDatabase = [];
 }
 
 // ===============================
-// 7. CHAT ENDPOINT
+// 7. CHAT ENDPOINT (WITH MEMORY)
 // ===============================
 app.post("/api/chat", async (req, res) => {
   console.log("POST /api/chat");
+
+  // Identify session (privacy-safe)
+  const sessionId = req.headers["x-session-id"] || req.ip;
 
   try {
     if (!openai) {
@@ -118,7 +126,10 @@ app.post("/api/chat", async (req, res) => {
 
     let context = "";
 
-    // ---- Vector Search ----
+    // Load conversation history
+    let history = conversationMemory.get(sessionId) || [];
+
+    // Vector search
     if (embeddingModel && vectorDatabase.length > 0) {
       const embedResult = await embeddingModel.embedContent(userQuery);
       const queryEmbedding = embedResult.embedding.values;
@@ -142,23 +153,39 @@ app.post("/api/chat", async (req, res) => {
       context = ranked.map(r => r.text).join("\n\n");
     }
 
-    // ---- GPT-5.2 via OpenRouter ----
+    // Build messages with conversation memory
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are Raven, an AI assistant for Adil Hasan’s portfolio. " +
+          "Use the provided context only if relevant.\n\n" +
+          context
+      },
+      ...history,
+      { role: "user", content: userQuery }
+    ];
+
     const completion = await openai.chat.completions.create({
       model: "openai/gpt-5.2",
-      messages: [
-        {
-          role: "system",
-          content: "You are Raven, an AI assistant for Adil Hasan’s portfolio. Use the provided context only if relevant.\n\n" + context
-        },
-        { role: "user", content: userQuery }
-      ],
+      messages,
       temperature: 0.7,
       max_tokens: 600
     });
 
-    res.json({
-      answer: completion.choices[0].message.content
-    });
+    const assistantReply = completion.choices[0].message.content;
+
+    // Save conversation memory
+    history.push({ role: "user", content: userQuery });
+    history.push({ role: "assistant", content: assistantReply });
+
+    if (history.length > MAX_MEMORY_MESSAGES) {
+      history = history.slice(-MAX_MEMORY_MESSAGES);
+    }
+
+    conversationMemory.set(sessionId, history);
+
+    res.json({ answer: assistantReply });
 
   } catch (err) {
     console.error("CHAT HANDLER ERROR:", err);
@@ -166,14 +193,11 @@ app.post("/api/chat", async (req, res) => {
     if (err.status === 401) {
       return res.status(401).json({ error: "Invalid OpenRouter API key" });
     }
-
     if (err.status === 429) {
       return res.status(429).json({ error: "AI is busy. Please try again shortly." });
     }
 
-    res.status(500).json({
-      error: "AI service error"
-    });
+    res.status(500).json({ error: "AI service error" });
   }
 });
 
@@ -182,13 +206,11 @@ app.post("/api/chat", async (req, res) => {
 // ===============================
 app.post("/api/admin/ingest", async (req, res) => {
   try {
-    // 1) Verify admin secret
     const secret = req.headers["x-admin-secret"];
     if (secret !== process.env.ADMIN_SECRET) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // 2) Validate input
     const { text } = req.body;
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Missing or invalid text" });
@@ -198,20 +220,18 @@ app.post("/api/admin/ingest", async (req, res) => {
       return res.status(500).json({ error: "Embedding model not available" });
     }
 
-    // 3) Create embedding
     const embed = await embeddingModel.embedContent(text);
 
-    // 4) Append to in-memory DB
     vectorDatabase.push({
       text,
       embedding: embed.embedding.values
     });
 
-    // 5) Persist to disk (same format you already use)
-    const dbPath = path.join(__dirname, "vector-database.json");
-    fs.writeFileSync(dbPath, JSON.stringify(vectorDatabase, null, 2));
+    fs.writeFileSync(
+      path.join(__dirname, "vector-database.json"),
+      JSON.stringify(vectorDatabase, null, 2)
+    );
 
-    // 6) Respond
     res.json({
       status: "Saved",
       totalEntries: vectorDatabase.length
@@ -222,7 +242,6 @@ app.post("/api/admin/ingest", async (req, res) => {
     res.status(500).json({ error: "Admin ingest failed" });
   }
 });
-
 
 // ===============================
 // 8. START SERVER
