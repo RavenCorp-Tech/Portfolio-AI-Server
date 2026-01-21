@@ -30,6 +30,10 @@ console.log("=================================");
 // ===============================
 // 3. CORS & BODY
 // ===============================
+
+// Serve admin UI (private, unlinked)
+app.use("/admin", express.static(path.join(__dirname, "admin")));
+
 app.use(cors({
   origin: true,
   credentials: true
