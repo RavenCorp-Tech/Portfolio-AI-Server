@@ -11,7 +11,7 @@
       color: #e5e7eb;
       padding: 2rem;
     }
-    textarea, input {
+    textarea {
       width: 100%;
       margin-top: 0.5rem;
       background: #020617;
@@ -19,9 +19,11 @@
       border: 1px solid #334155;
       border-radius: 6px;
       padding: 0.6rem;
+      min-height: 100px;
     }
     button {
-      margin-top: 0.5rem;
+      margin-top: 0.6rem;
+      margin-right: 0.4rem;
       padding: 0.4rem 0.8rem;
       cursor: pointer;
     }
@@ -31,15 +33,18 @@
       padding: 1rem;
       margin-bottom: 1rem;
     }
+    small {
+      color: #94a3b8;
+    }
   </style>
 </head>
 <body>
 
-<h1>Raven Knowledge Manager</h1>
+<h1>📚 Raven Knowledge Manager</h1>
 
-<button onclick="go('index.html')">⬅ Back</button>
+<button onclick="go('index.html')">⬅ Back to Dashboard</button>
 
-<ul id="knowledge"></ul>
+<div id="entries"></div>
 
 <script src="admin.js"></script>
 <script>
@@ -47,55 +52,13 @@ async function loadKnowledge() {
   const res = await fetch("/api/admin/knowledge", {
     credentials: "include"
   });
+
+  if (!res.ok) {
+    alert("Failed to load knowledge (are you logged in?)");
+    return;
+  }
+
   const data = await res.json();
-
-  const ul = document.getElementById("knowledge");
-  ul.innerHTML = "";
-
-  data.forEach(entry => {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <textarea onchange="update('${entry.id}', this.value)">${entry.text}</textarea>
-      <button onclick="del('${entry.id}')">❌ Delete</button>
-    `;
-    ul.appendChild(li);
-  });
-}
-
-async function update(id, text) {
-  await fetch(`/api/admin/knowledge/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ text })
-  });
-}
-
-async function del(id) {
-  if (!confirm("Delete this entry?")) return;
-  await fetch(`/api/admin/knowledge/${id}`, {
-    method: "DELETE",
-    credentials: "include"
-  });
-  loadKnowledge();
-}
-
-loadKnowledge();
-</script>
-
-<input type="password" id="secret" placeholder="Admin secret" />
-<button onclick="load()">Load Knowledge</button>
-
-<div id="entries"></div>
-
-<script>
-async function load() {
-  const secret = document.getElementById("secret").value;
-  const res = await fetch("/api/admin/knowledge", {
-    headers: { "x-admin-secret": secret }
-  });
-  const data = await res.json();
-
   const container = document.getElementById("entries");
   container.innerHTML = "";
 
@@ -104,42 +67,56 @@ async function load() {
     div.className = "entry";
 
     div.innerHTML = `
-      <small>${entry.id}</small>
-      <textarea>${entry.text}</textarea>
-      <button onclick="save('${entry.id}', this)">Save</button>
-      <button onclick="del('${entry.id}')">Delete</button>
+      <small>ID: ${entry.id}</small>
+      <textarea id="text-${entry.id}">${entry.text}</textarea>
+      <br>
+      <button onclick="saveEntry('${entry.id}')">💾 Save</button>
+      <button onclick="deleteEntry('${entry.id}')">❌ Delete</button>
     `;
+
     container.appendChild(div);
   });
 }
 
-async function save(id, btn) {
-  const text = btn.previousElementSibling.value;
-  const secret = document.getElementById("secret").value;
+async function saveEntry(id) {
+  const text = document.getElementById(`text-${id}`).value.trim();
 
-  await fetch("/api/admin/knowledge/" + id, {
+  if (!text) {
+    alert("Text cannot be empty");
+    return;
+  }
+
+  const res = await fetch(`/api/admin/knowledge/${id}`, {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-secret": secret
-    },
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ text })
   });
 
-  alert("Updated");
+  if (res.ok) {
+    alert("Updated successfully");
+  } else {
+    alert("Update failed");
+  }
 }
 
-async function del(id) {
-  const secret = document.getElementById("secret").value;
+async function deleteEntry(id) {
   if (!confirm("Delete this entry?")) return;
 
-  await fetch("/api/admin/knowledge/" + id, {
+  const res = await fetch(`/api/admin/knowledge/${id}`, {
     method: "DELETE",
-    headers: { "x-admin-secret": secret }
+    credentials: "include"
   });
 
-  load();
+  if (res.ok) {
+    loadKnowledge();
+  } else {
+    alert("Delete failed");
+  }
 }
+
+// Initial load
+loadKnowledge();
 </script>
 
 </body>
