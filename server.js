@@ -9,6 +9,9 @@ const cors = require("cors");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const OpenAI = require("openai");
 
+const session = require("express-session");
+const bcrypt = require("bcrypt");
+
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -28,7 +31,7 @@ console.log("PORT:", port);
 console.log("=================================");
 
 // ===============================
-// 3. CORS & BODY
+// 3. CORS, STATIC & BODY
 // ===============================
 
 // Serve admin UI (private, unlinked)
@@ -39,6 +42,58 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: "1mb" }));
+
+// ===============================
+// SESSION SETUP (ADMIN AUTH)
+// ===============================
+app.use(session({
+  name: "raven_admin",
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict"
+  }
+}));
+
+function requireAdmin(req, res, next) {
+  if (req.session?.admin === true) return next();
+  res.status(401).json({ error: "Unauthorized" });
+}
+
+// ===============================
+// ADMIN LOGIN
+// ===============================
+app.post("/api/admin/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  if (username !== process.env.ADMIN_USERNAME) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  const ok = await bcrypt.compare(
+    password,
+    process.env.ADMIN_PASSWORD_HASH
+  );
+
+  if (!ok) {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  req.session.admin = true;
+  res.json({ status: "Logged in" });
+});
+
+// ===============================
+// ADMIN LOGOUT
+// ===============================
+app.post("/api/admin/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ status: "Logged out" });
+  });
+});
 
 // ===============================
 // 4. HEALTH CHECK
@@ -59,18 +114,12 @@ let embeddingModel = null;
 let openai = null;
 
 try {
-  // Gemini embeddings
   if (process.env.GEMINI_API_KEY) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    embeddingModel = genAI.getGenerativeModel({
-      model: "text-embedding-004"
-    });
+    embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
     console.log("Gemini embedding model ready");
-  } else {
-    console.warn("WARNING: GEMINI_API_KEY not set");
   }
 
-  // OpenRouter (GPT-5.2)
   if (process.env.OPENAI_API_KEY) {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -81,12 +130,10 @@ try {
       }
     });
     console.log("OpenRouter OpenAI client ready");
-  } else {
-    console.warn("WARNING: OPENAI_API_KEY not set");
   }
 
 } catch (err) {
-  console.error("AI INIT FAILURE (non-fatal):", err);
+  console.error("AI INIT FAILURE:", err);
 }
 
 // ===============================
@@ -96,274 +143,137 @@ let vectorDatabase = [];
 
 try {
   const dbPath = path.join(__dirname, "vector-database.json");
-  console.log("Loading DB from:", dbPath);
-
   if (fs.existsSync(dbPath)) {
     vectorDatabase = JSON.parse(fs.readFileSync(dbPath, "utf8"));
     console.log(`Vector DB loaded: ${vectorDatabase.length} entries`);
-  } else {
-    console.warn("vector-database.json NOT FOUND");
   }
 } catch (err) {
   console.error("DB LOAD ERROR:", err);
-  vectorDatabase = [];
 }
 
 // ===============================
-// 7. CHAT ENDPOINT (WITH MEMORY)
+// 7. CHAT ENDPOINT
 // ===============================
 app.post("/api/chat", async (req, res) => {
-  console.log("POST /api/chat");
-
-  // Identify session (privacy-safe)
   const sessionId = req.headers["x-session-id"] || req.ip;
 
   try {
-    if (!openai) {
-      return res.status(500).json({ error: "AI client not initialized" });
-    }
-
     const userQuery = req.body?.question;
-    if (!userQuery) {
-      return res.status(400).json({ error: "Missing question" });
-    }
+    if (!userQuery) return res.status(400).json({ error: "Missing question" });
 
+    let history = conversationMemory.get(sessionId) || [];
     let context = "";
 
-    // Load conversation history
-    let history = conversationMemory.get(sessionId) || [];
-
-    // Vector search
     if (embeddingModel && vectorDatabase.length > 0) {
       const embedResult = await embeddingModel.embedContent(userQuery);
-      const queryEmbedding = embedResult.embedding.values;
+      const qv = embedResult.embedding.values;
 
-      const ranked = vectorDatabase
-        .map(chunk => {
-          let dot = 0, nA = 0, nB = 0;
-          for (let i = 0; i < queryEmbedding.length; i++) {
-            dot += queryEmbedding[i] * chunk.embedding[i];
-            nA += queryEmbedding[i] ** 2;
-            nB += chunk.embedding[i] ** 2;
+      context = vectorDatabase
+        .map(e => {
+          let dot = 0, na = 0, nb = 0;
+          for (let i = 0; i < qv.length; i++) {
+            dot += qv[i] * e.embedding[i];
+            na += qv[i] ** 2;
+            nb += e.embedding[i] ** 2;
           }
-          return {
-            text: chunk.text,
-            score: dot / (Math.sqrt(nA) * Math.sqrt(nB))
-          };
+          return { text: e.text, score: dot / (Math.sqrt(na) * Math.sqrt(nb)) };
         })
         .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-
-      context = ranked.map(r => r.text).join("\n\n");
+        .slice(0, 3)
+        .map(r => r.text)
+        .join("\n\n");
     }
-
-    // Build messages with conversation memory
-    const messages = [
-      {
-        role: "system",
-        content:
-          "You are Raven, an AI assistant for Adil Hasan’s portfolio. " +
-          "Use the provided context only if relevant.\n\n" +
-          context
-      },
-      ...history,
-      { role: "user", content: userQuery }
-    ];
 
     const completion = await openai.chat.completions.create({
       model: "openai/gpt-5.2",
-      messages,
-      temperature: 0.7,
-      max_tokens: 600
+      messages: [
+        { role: "system", content: "Use context if relevant:\n\n" + context },
+        ...history,
+        { role: "user", content: userQuery }
+      ]
     });
 
-    const assistantReply = completion.choices[0].message.content;
+    const reply = completion.choices[0].message.content;
 
-    // Save conversation memory
     history.push({ role: "user", content: userQuery });
-    history.push({ role: "assistant", content: assistantReply });
+    history.push({ role: "assistant", content: reply });
+    conversationMemory.set(sessionId, history.slice(-MAX_MEMORY_MESSAGES));
 
-    if (history.length > MAX_MEMORY_MESSAGES) {
-      history = history.slice(-MAX_MEMORY_MESSAGES);
-    }
-
-    conversationMemory.set(sessionId, history);
-
-    res.json({ answer: assistantReply });
+    res.json({ answer: reply });
 
   } catch (err) {
-    console.error("CHAT HANDLER ERROR:", err);
-
-    if (err.status === 401) {
-      return res.status(401).json({ error: "Invalid OpenRouter API key" });
-    }
-    if (err.status === 429) {
-      return res.status(429).json({ error: "AI is busy. Please try again shortly." });
-    }
-
+    console.error("CHAT ERROR:", err);
     res.status(500).json({ error: "AI service error" });
   }
 });
 
-
 // ===============================
-// ADMIN-ONLY INGESTION ENDPOINT
+// ADMIN INGEST (LOGIN PROTECTED)
 // ===============================
-app.post("/api/admin/ingest", async (req, res) => {
-  try {
-    const secret = req.headers["x-admin-secret"];
-    if (secret !== process.env.ADMIN_SECRET) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+app.post("/api/admin/ingest", requireAdmin, async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "Missing text" });
 
-    const { text } = req.body;
-    if (!text || typeof text !== "string") {
-      return res.status(400).json({ error: "Missing or invalid text" });
-    }
+  const embed = await embeddingModel.embedContent(text);
 
-    if (!embeddingModel) {
-      return res.status(500).json({ error: "Embedding model not available" });
-    }
+  vectorDatabase.push({
+    id: `k_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    text,
+    embedding: embed.embedding.values,
+    createdAt: new Date().toISOString()
+  });
 
-    const embed = await embeddingModel.embedContent(text);
+  fs.writeFileSync(
+    path.join(__dirname, "vector-database.json"),
+    JSON.stringify(vectorDatabase, null, 2)
+  );
 
-    vectorDatabase.push({
-  id: `k_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  text,
-  embedding: embed.embedding.values,
-  createdAt: new Date().toISOString()
+  res.json({ status: "Saved", totalEntries: vectorDatabase.length });
 });
 
-
-    fs.writeFileSync(
-      path.join(__dirname, "vector-database.json"),
-      JSON.stringify(vectorDatabase, null, 2)
-    );
-
-    res.json({
-      status: "Saved",
-      totalEntries: vectorDatabase.length
-    });
-
-  } catch (err) {
-    console.error("ADMIN INGEST ERROR:", err);
-    res.status(500).json({ error: "Admin ingest failed" });
+// ===============================
+// ADMIN MEMORY VIEWER
+// ===============================
+app.get("/api/admin/memory", requireAdmin, (req, res) => {
+  const conversations = {};
+  for (const [k, v] of conversationMemory.entries()) {
+    conversations[k] = v;
   }
+  res.json({ knowledgeEntries: vectorDatabase.length, conversations });
 });
 
-
 // ===============================
-// ADMIN MEMORY VIEWER (READ-ONLY)
+// ADMIN KNOWLEDGE CRUD
 // ===============================
-app.get("/api/admin/memory", (req, res) => {
-  try {
-    const secret = req.headers["x-admin-secret"];
-    if (secret !== process.env.ADMIN_SECRET) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    // Convert Map to object for JSON
-    const conversations = {};
-    for (const [session, history] of conversationMemory.entries()) {
-      conversations[session] = history;
-    }
-
-    res.json({
-      knowledgeEntries: vectorDatabase.length,
-      knowledgeSample: vectorDatabase.slice(0, 5), // show first 5 only
-      conversations
-    });
-
-  } catch (err) {
-    console.error("MEMORY VIEW ERROR:", err);
-    res.status(500).json({ error: "Failed to load memory" });
-  }
-});
-
-
-// ===============================
-// ADMIN: LIST KNOWLEDGE ENTRIES
-// ===============================
-app.get("/api/admin/knowledge", (req, res) => {
-  const secret = req.headers["x-admin-secret"];
-  if (secret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
+app.get("/api/admin/knowledge", requireAdmin, (req, res) => {
   res.json(vectorDatabase);
 });
 
-
-// ===============================
-// ADMIN: DELETE KNOWLEDGE ENTRY
-// ===============================
-app.delete("/api/admin/knowledge/:id", (req, res) => {
-  const secret = req.headers["x-admin-secret"];
-  if (secret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
-  const { id } = req.params;
-  const initialLength = vectorDatabase.length;
-
-  vectorDatabase = vectorDatabase.filter(entry => entry.id !== id);
-
-  if (vectorDatabase.length === initialLength) {
-    return res.status(404).json({ error: "Entry not found" });
-  }
-
-  fs.writeFileSync(
-    path.join(__dirname, "vector-database.json"),
-    JSON.stringify(vectorDatabase, null, 2)
-  );
-
-  res.json({ status: "Deleted", totalEntries: vectorDatabase.length });
+app.delete("/api/admin/knowledge/:id", requireAdmin, (req, res) => {
+  vectorDatabase = vectorDatabase.filter(e => e.id !== req.params.id);
+  fs.writeFileSync(path.join(__dirname, "vector-database.json"),
+    JSON.stringify(vectorDatabase, null, 2));
+  res.json({ status: "Deleted" });
 });
 
+app.put("/api/admin/knowledge/:id", requireAdmin, async (req, res) => {
+  const entry = vectorDatabase.find(e => e.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "Not found" });
 
-// ===============================
-// ADMIN: EDIT KNOWLEDGE ENTRY
-// ===============================
-app.put("/api/admin/knowledge/:id", async (req, res) => {
-  const secret = req.headers["x-admin-secret"];
-  if (secret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
-  const { id } = req.params;
-  const { text } = req.body;
-
-  if (!text || typeof text !== "string") {
-    return res.status(400).json({ error: "Invalid text" });
-  }
-
-  const entry = vectorDatabase.find(e => e.id === id);
-  if (!entry) {
-    return res.status(404).json({ error: "Entry not found" });
-  }
-
-  // Re-embed safely
-  const embed = await embeddingModel.embedContent(text);
-
-  entry.text = text;
+  const embed = await embeddingModel.embedContent(req.body.text);
+  entry.text = req.body.text;
   entry.embedding = embed.embedding.values;
   entry.updatedAt = new Date().toISOString();
 
-  fs.writeFileSync(
-    path.join(__dirname, "vector-database.json"),
-    JSON.stringify(vectorDatabase, null, 2)
-  );
+  fs.writeFileSync(path.join(__dirname, "vector-database.json"),
+    JSON.stringify(vectorDatabase, null, 2));
 
   res.json({ status: "Updated" });
 });
-
 
 // ===============================
 // 8. START SERVER
 // ===============================
 app.listen(port, () => {
-  console.log("=================================");
-  console.log("SERVER LISTENING SUCCESSFULLY");
-  console.log("PORT:", port);
-  console.log("=================================");
+  console.log("SERVER LISTENING ON", port);
 });

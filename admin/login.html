@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Raven Admin Login</title>
+</head>
+<body>
+  <h1>Admin Login</h1>
+
+  <input id="u" placeholder="Username"><br><br>
+  <input id="p" type="password" placeholder="Password"><br><br>
+  <button onclick="login()">Login</button>
+
+  <pre id="msg"></pre>
+
+<script>
+async function login() {
+  const res = await fetch("/api/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: u.value,
+      password: p.value
+    })
+  });
+
+  if (res.ok) {
+    location.href = "/admin/index.html";
+  } else {
+    msg.textContent = "Login failed";
+  }
+}
+</script>
+</body>
+</html>
