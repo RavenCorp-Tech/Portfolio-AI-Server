@@ -46,6 +46,8 @@ app.use(express.json({ limit: "1mb" }));
 // ===============================
 // SESSION SETUP (ADMIN AUTH)
 // ===============================
+app.set("trust proxy", 1); // ADD THIS LINE
+
 app.use(session({
   name: "raven_admin",
   secret: process.env.SESSION_SECRET,
@@ -54,9 +56,10 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: true,
-    sameSite: "strict"
+    sameSite: "lax"
   }
 }));
+
 
 function requireAdmin(req, res, next) {
   if (req.session?.admin === true) return next();

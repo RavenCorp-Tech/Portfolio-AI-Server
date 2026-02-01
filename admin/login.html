@@ -30,6 +30,12 @@ async function login() {
     msg.textContent = "Login failed";
   }
 }
+console.log("LOGIN ATTEMPT:", {
+  user: username,
+  envUser: process.env.ADMIN_USERNAME,
+  hasHash: !!process.env.ADMIN_PASSWORD_HASH
+});
+
 </script>
 </body>
 </html>
