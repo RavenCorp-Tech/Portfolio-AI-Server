@@ -70,10 +70,19 @@ function requireAdmin(req, res, next) {
 // ADMIN LOGIN
 // ===============================
 app.post("/api/admin/login", async (req, res) => {
-  const { username, password } = req.body;
+  console.log("LOGIN HIT");
+  console.log("BODY:", req.body);
+  console.log("ENV USER:", process.env.ADMIN_USERNAME);
+  console.log("HAS HASH:", !!process.env.ADMIN_PASSWORD_HASH);
+
+  const { username, password } = req.body || {};
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Missing credentials" });
+  }
 
   if (username !== process.env.ADMIN_USERNAME) {
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Username mismatch" });
   }
 
   const ok = await bcrypt.compare(
@@ -81,13 +90,17 @@ app.post("/api/admin/login", async (req, res) => {
     process.env.ADMIN_PASSWORD_HASH
   );
 
+  console.log("PASSWORD MATCH:", ok);
+
   if (!ok) {
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Password mismatch" });
   }
 
   req.session.admin = true;
+  console.log("LOGIN SUCCESS, SESSION:", req.session);
   res.json({ status: "Logged in" });
 });
+
 
 // ===============================
 // ADMIN LOGOUT
