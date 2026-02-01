@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>Raven Admin Panel</title>
-  <link rel="stylesheet" href="admin.css">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
@@ -11,9 +10,6 @@
       background: #0f172a;
       color: #e5e7eb;
       padding: 2rem;
-    }
-    h1 {
-      margin-bottom: 0.5rem;
     }
     textarea {
       width: 100%;
@@ -23,26 +19,15 @@
       border: 1px solid #334155;
       border-radius: 6px;
       padding: 1rem;
-      font-size: 14px;
-    }
-    input {
-      width: 100%;
-      margin-top: 1rem;
-      background: #020617;
-      color: #e5e7eb;
-      border: 1px solid #334155;
-      border-radius: 6px;
-      padding: 0.6rem;
-      font-size: 14px;
     }
     button {
       margin-top: 1rem;
+      margin-right: 0.5rem;
       padding: 0.6rem 1.2rem;
       background: #2563eb;
       color: white;
       border: none;
       border-radius: 6px;
-      font-size: 14px;
       cursor: pointer;
     }
     button:hover {
@@ -50,72 +35,56 @@
     }
     #status {
       margin-top: 1rem;
-      font-size: 14px;
     }
   </style>
 </head>
 <body>
 
-  <h1>Raven Admin Panel</h1>
-  <p>Add new knowledge for Raven (admin only).</p>
+<h1>🛡 Raven Admin Panel</h1>
+<p>Add new knowledge for Raven.</p>
 
-  <textarea id="text" placeholder="Paste knowledge here..."></textarea>
+<textarea id="text" placeholder="Paste knowledge here..."></textarea>
 
-  <input
-    type="password"
-    id="secret"
-    placeholder="Admin secret"
-  />
+<button onclick="submitKnowledge()">➕ Save Knowledge</button>
 
-  <button onclick="submitKnowledge()">Save to Raven</button>
+<div id="status"></div>
 
-  <div id="status"></div>
+<hr style="margin:2rem 0;border-color:#334155;">
 
-  <div class="nav">
-  <button onclick="go('knowledge.html')">📚 Knowledge Manager</button>
-  <button onclick="go('memory.html')">🧠 Conversation Memory</button>
-  <button onclick="logout()">🚪 Logout</button>
-</div>
+<button onclick="go('knowledge.html')">📚 Knowledge Manager</button>
+<button onclick="go('memory.html')">🧠 Conversation Memory</button>
+<button onclick="logout()">🚪 Logout</button>
 
-  <script>
-    async function submitKnowledge() {
-      const text = document.getElementById("text").value.trim();
-      const secret = document.getElementById("secret").value.trim();
-      const status = document.getElementById("status");
-
-      if (!text || !secret) {
-        status.textContent = "Text and secret are required.";
-        return;
-      }
-
-      status.textContent = "Saving...";
-
-      try {
-        const res = await fetch("/api/admin/ingest", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-admin-secret": secret
-          },
-          body: JSON.stringify({ text })
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.error || "Failed");
-        }
-
-        status.textContent = `Saved successfully. Total entries: ${data.totalEntries}`;
-        document.getElementById("text").value = "";
-
-      } catch (err) {
-        status.textContent = "Error: " + err.message;
-      }
-    }
-  </script>
-  
 <script src="admin.js"></script>
+<script>
+async function submitKnowledge() {
+  const text = document.getElementById("text").value.trim();
+  const status = document.getElementById("status");
+
+  if (!text) {
+    status.textContent = "Text is required.";
+    return;
+  }
+
+  status.textContent = "Saving...";
+
+  const res = await fetch("/api/admin/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ text })
+  });
+
+  const data = await res.json();
+
+  if (res.ok) {
+    status.textContent = `Saved. Total entries: ${data.totalEntries}`;
+    text.value = "";
+  } else {
+    status.textContent = data.error || "Error saving knowledge";
+  }
+}
+</script>
 
 </body>
 </html>
