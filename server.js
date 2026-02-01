@@ -228,9 +228,12 @@ app.post("/api/admin/ingest", async (req, res) => {
     const embed = await embeddingModel.embedContent(text);
 
     vectorDatabase.push({
-      text,
-      embedding: embed.embedding.values
-    });
+  id: `k_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  text,
+  embedding: embed.embedding.values,
+  createdAt: new Date().toISOString()
+});
+
 
     fs.writeFileSync(
       path.join(__dirname, "vector-database.json"),
@@ -275,6 +278,83 @@ app.get("/api/admin/memory", (req, res) => {
     console.error("MEMORY VIEW ERROR:", err);
     res.status(500).json({ error: "Failed to load memory" });
   }
+});
+
+
+// ===============================
+// ADMIN: LIST KNOWLEDGE ENTRIES
+// ===============================
+app.get("/api/admin/knowledge", (req, res) => {
+  const secret = req.headers["x-admin-secret"];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  res.json(vectorDatabase);
+});
+
+
+// ===============================
+// ADMIN: DELETE KNOWLEDGE ENTRY
+// ===============================
+app.delete("/api/admin/knowledge/:id", (req, res) => {
+  const secret = req.headers["x-admin-secret"];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const { id } = req.params;
+  const initialLength = vectorDatabase.length;
+
+  vectorDatabase = vectorDatabase.filter(entry => entry.id !== id);
+
+  if (vectorDatabase.length === initialLength) {
+    return res.status(404).json({ error: "Entry not found" });
+  }
+
+  fs.writeFileSync(
+    path.join(__dirname, "vector-database.json"),
+    JSON.stringify(vectorDatabase, null, 2)
+  );
+
+  res.json({ status: "Deleted", totalEntries: vectorDatabase.length });
+});
+
+
+// ===============================
+// ADMIN: EDIT KNOWLEDGE ENTRY
+// ===============================
+app.put("/api/admin/knowledge/:id", async (req, res) => {
+  const secret = req.headers["x-admin-secret"];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const { id } = req.params;
+  const { text } = req.body;
+
+  if (!text || typeof text !== "string") {
+    return res.status(400).json({ error: "Invalid text" });
+  }
+
+  const entry = vectorDatabase.find(e => e.id === id);
+  if (!entry) {
+    return res.status(404).json({ error: "Entry not found" });
+  }
+
+  // Re-embed safely
+  const embed = await embeddingModel.embedContent(text);
+
+  entry.text = text;
+  entry.embedding = embed.embedding.values;
+  entry.updatedAt = new Date().toISOString();
+
+  fs.writeFileSync(
+    path.join(__dirname, "vector-database.json"),
+    JSON.stringify(vectorDatabase, null, 2)
+  );
+
+  res.json({ status: "Updated" });
 });
 
 

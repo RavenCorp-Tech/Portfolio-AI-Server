@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Raven Knowledge Manager</title>
+  <style>
+    body {
+      font-family: system-ui;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 2rem;
+    }
+    textarea, input {
+      width: 100%;
+      margin-top: 0.5rem;
+      background: #020617;
+      color: #e5e7eb;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 0.6rem;
+    }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      cursor: pointer;
+    }
+    .entry {
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Raven Knowledge Manager</h1>
+
+<input type="password" id="secret" placeholder="Admin secret" />
+<button onclick="load()">Load Knowledge</button>
+
+<div id="entries"></div>
+
+<script>
+async function load() {
+  const secret = document.getElementById("secret").value;
+  const res = await fetch("/api/admin/knowledge", {
+    headers: { "x-admin-secret": secret }
+  });
+  const data = await res.json();
+
+  const container = document.getElementById("entries");
+  container.innerHTML = "";
+
+  data.forEach(entry => {
+    const div = document.createElement("div");
+    div.className = "entry";
+
+    div.innerHTML = `
+      <small>${entry.id}</small>
+      <textarea>${entry.text}</textarea>
+      <button onclick="save('${entry.id}', this)">Save</button>
+      <button onclick="del('${entry.id}')">Delete</button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function save(id, btn) {
+  const text = btn.previousElementSibling.value;
+  const secret = document.getElementById("secret").value;
+
+  await fetch("/api/admin/knowledge/" + id, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-secret": secret
+    },
+    body: JSON.stringify({ text })
+  });
+
+  alert("Updated");
+}
+
+async function del(id) {
+  const secret = document.getElementById("secret").value;
+  if (!confirm("Delete this entry?")) return;
+
+  await fetch("/api/admin/knowledge/" + id, {
+    method: "DELETE",
+    headers: { "x-admin-secret": secret }
+  });
+
+  load();
+}
+</script>
+
+</body>
+</html>
