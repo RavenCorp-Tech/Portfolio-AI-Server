@@ -248,6 +248,36 @@ app.post("/api/admin/ingest", async (req, res) => {
   }
 });
 
+
+// ===============================
+// ADMIN MEMORY VIEWER (READ-ONLY)
+// ===============================
+app.get("/api/admin/memory", (req, res) => {
+  try {
+    const secret = req.headers["x-admin-secret"];
+    if (secret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Convert Map to object for JSON
+    const conversations = {};
+    for (const [session, history] of conversationMemory.entries()) {
+      conversations[session] = history;
+    }
+
+    res.json({
+      knowledgeEntries: vectorDatabase.length,
+      knowledgeSample: vectorDatabase.slice(0, 5), // show first 5 only
+      conversations
+    });
+
+  } catch (err) {
+    console.error("MEMORY VIEW ERROR:", err);
+    res.status(500).json({ error: "Failed to load memory" });
+  }
+});
+
+
 // ===============================
 // 8. START SERVER
 // ===============================
