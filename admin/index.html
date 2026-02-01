@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Raven Admin Panel</title>
+  <link rel="stylesheet" href="admin.css">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
@@ -70,6 +71,12 @@
 
   <div id="status"></div>
 
+  <div class="nav">
+  <button onclick="go('knowledge.html')">📚 Knowledge Manager</button>
+  <button onclick="go('memory.html')">🧠 Conversation Memory</button>
+  <button onclick="logout()">🚪 Logout</button>
+</div>
+
   <script>
     async function submitKnowledge() {
       const text = document.getElementById("text").value.trim();
@@ -107,6 +114,8 @@
       }
     }
   </script>
+  
+<script src="admin.js"></script>
 
 </body>
 </html>

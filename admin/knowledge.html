@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Raven Knowledge Manager</title>
+  <link rel="stylesheet" href="admin.css">
   <style>
     body {
       font-family: system-ui;
@@ -35,6 +36,52 @@
 <body>
 
 <h1>Raven Knowledge Manager</h1>
+
+<button onclick="go('index.html')">⬅ Back</button>
+
+<ul id="knowledge"></ul>
+
+<script src="admin.js"></script>
+<script>
+async function loadKnowledge() {
+  const res = await fetch("/api/admin/knowledge", {
+    credentials: "include"
+  });
+  const data = await res.json();
+
+  const ul = document.getElementById("knowledge");
+  ul.innerHTML = "";
+
+  data.forEach(entry => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <textarea onchange="update('${entry.id}', this.value)">${entry.text}</textarea>
+      <button onclick="del('${entry.id}')">❌ Delete</button>
+    `;
+    ul.appendChild(li);
+  });
+}
+
+async function update(id, text) {
+  await fetch(`/api/admin/knowledge/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ text })
+  });
+}
+
+async function del(id) {
+  if (!confirm("Delete this entry?")) return;
+  await fetch(`/api/admin/knowledge/${id}`, {
+    method: "DELETE",
+    credentials: "include"
+  });
+  loadKnowledge();
+}
+
+loadKnowledge();
+</script>
 
 <input type="password" id="secret" placeholder="Admin secret" />
 <button onclick="load()">Load Knowledge</button>

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Raven Memory Viewer</title>
+  <link rel="stylesheet" href="admin.css">
   <style>
     body {
       font-family: system-ui;
@@ -37,6 +38,24 @@
 <body>
 
 <h1>Raven Memory Viewer</h1>
+
+<button onclick="go('index.html')">⬅ Back</button>
+
+<pre id="memory"></pre>
+
+<script src="admin.js"></script>
+<script>
+async function loadMemory() {
+  const res = await fetch("/api/admin/memory", {
+    credentials: "include"
+  });
+  const data = await res.json();
+  document.getElementById("memory").textContent =
+    JSON.stringify(data.conversations, null, 2);
+}
+
+loadMemory();
+</script>
 
 <input type="password" id="secret" placeholder="Admin secret" />
 <button onclick="loadMemory()">Load Memory</button>
